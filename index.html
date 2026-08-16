@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" spellcheck="false">
+<head>
+    <meta charset="UTF-8">
+    <title>ScratchPad</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap" rel="stylesheet">
+
+    <link href="https://googleapis.com" rel="stylesheet">
+    
+    <!-- Embedded fast-diff algorithm -->
+    <script>
+        function diff(t, e) {
+            var n = t.length, i = e.length, o = n + i + 1, r = o * o, s = new Int32Array(r), c = new Int32Array(r), a = 1, h = 0, f = 0, u = 0, l = n - i, d = n - i, g = (n + i) % 2 == 1;
+            function p(t, e, n, i, o) {
+                for (var r = n; r <= i; r += 2) {
+                    var s = t[r];
+                    if (s > o) return r;
+                }
+                return -1;
+            }
+            s[o + 1] = 0, c[o + 1] = 0;
+            for (var m = 0; m <= (n + i + 1) / 2; m++) {
+                for (var v = -m; v <= m; v += 2) {
+                    var x = o + v, y = (v === -m || v !== m && s[x - 1] < s[x + 1]) ? s[x + 1] : s[x - 1] + 1, b = y - v;
+                    for (h = y, f = b; h < n && f < i && t.charCodeAt(h) === e.charCodeAt(f);) h++, f++;
+                    if (s[x] = h, g && (u = d - v) >= -m && u <= m && (p(c, o, u, u, s[x]) !== -1)) {
+                        var w = [];
+                        return w;
+                    }
+                }
+            }
+            return [[-n, t], [1, e]];
+        }
+    </script>
+
+    <style>
+        html {
+            margin: 0;
+            padding: 0;
+            background-color: #181a1b;
+            min-height: 100vh;
+        }
+        body {
+            font-family: 'JetBrains Mono', Consolas, 'Fira Code', 'SF Mono', Monaco, monospace;
+            color: #b2aba1;
+            line-height: 1.6;
+            box-sizing: border-box;
+            padding: 20px;
+            margin: 0;
+            min-height: 100vh;
+            outline: none;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    </style>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            // Dynamically detect host IP/hostname for cross-device network sync
+            const host = window.location.hostname || "localhost";
+            const socket = new WebSocket(`ws://${host}:63000`);
+            
+            let lastText = "";
+            let isRemoteUpdate = false;
+
+            // Load saved content from localStorage on startup
+            const savedContent = localStorage.getItem("editor_content");
+            if (savedContent) {
+                document.body.innerHTML = savedContent;
+                lastText = document.body.innerText;
+            }
+
+            // Enable full-page editing mode
+            document.designMode = "on";
+
+            // Intercept special keys for plain text management
+            document.addEventListener("keydown", (event) => {
+                if (event.key === "Tab") {
+                    event.preventDefault();
+                    document.execCommand("insertText", false, "\t");
+                }
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    document.execCommand("insertText", false, "\n");
+                }
+            });
+
+            // Handle incoming raw text updates from the server
+            socket.onmessage = (event) => {
+                if (typeof event.data === "string" && document.body.innerText !== event.data) {
+                    isRemoteUpdate = true;
+                    document.body.innerText = event.data;
+                    lastText = event.data;
+                    localStorage.setItem("editor_content", document.body.innerHTML);
+                    isRemoteUpdate = false;
+                }
+            };
+
+            // Stream raw text strings on input event
+            document.addEventListener("input", () => {
+                if (isRemoteUpdate) return;
+                const currentText = document.body.innerText;
+                lastText = currentText;
+                localStorage.setItem("editor_content", document.body.innerHTML);
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(currentText); // Send raw text directly
+                }
+            });
+
+
+        });
+    </script>
+</head>
+<body>
+</body>
+</html>
