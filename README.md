@@ -2,10 +2,11 @@
 A simple self-hosted scratch pad using WebSockets. Allows you to move text between multiple PCs on a local network and syncs edits in real time across the network. Designed to be as lightweight as possible.
 
 
-<video autoplay loop muted playsinline width="800">
-  <source src="ScratchPad_clip.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+
+
+https://github.com/user-attachments/assets/f2c80fc5-60e5-416a-940d-48f7640ddd6b
+
+
 
 
 Live edits are propagated using web sockets. (Caution: there is no dispute resolution if multiple users are editing at once. This is intended for you to use as a scratch pad as a single user, synchronously.)
