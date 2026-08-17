@@ -1,6 +1,13 @@
 # ScratchPad
 A simple self-hosted scratch pad using WebSockets. Allows you to move text between multiple PCs on a local network and syncs edits in real time across the network. Designed to be as lightweight as possible.
 
+
+<video autoplay loop muted playsinline width="800">
+  <source src="ScratchPad_clip.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+
 Live edits are propagated using web sockets. (Caution: there is no dispute resolution if multiple users are editing at once. This is intended for you to use as a scratch pad as a single user, synchronously.)
 
 The repo is designed to run two servers: 
@@ -44,7 +51,7 @@ If you are not on NixOS, you will need to run the command in `flake.nix`, namely
 
 This spins-up both servers in a single terminal window and will run until the terminal is closed
 
-Now open a web browser and visit `localhost:63001` if you are connecting from the main PC. Or visit `ip:63000` if on another PC in your local network.
+Now open a web browser and visit `localhost:63001` if you are connecting from the main PC. Or visit `ip_address:63001` if on another PC in your local network.
 
 Type some text and you will see it appear magically in any browser currently visiting the ip address.
 
