@@ -16,6 +16,8 @@ The repo is designed to run two servers:
 - An http server runs on port 63001 and serves a single http file.
 - A WebSocket server runs on port 63000 and synchronizes all the client updates.
 
+  __Caution! This repo is not security hardened and uses no encryption. Anything pasted in the scratchpad is transmitted in the clear! Do not use for sensitive information!__
+
 ## Dependencies
 - Python3
 - websockets
