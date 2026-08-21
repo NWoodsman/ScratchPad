@@ -1,0 +1,28 @@
+import os
+
+compose_content = """version: '3.8'
+
+services:
+  scratchpad:
+    # Matches the GHCR path from the GitHub Actions workflow
+    image: ghcr.io/nwoodsman/scratchpad:latest
+    container_name: scratchpad
+    restart: unless-stopped
+    
+    ports:
+      # Websocket port
+      - "63000:63000"
+      # HTTP server port
+      - "63001:63001"
+      
+    # If deploying to a server exposed over a mesh network like Tailscale, 
+    # you can bind directly to that specific IP for secure remote access:
+    # ports:
+    #   - "100.x.y.z:63000:63000"
+    #   - "100.x.y.z:63001:63001"
+"""
+
+with open('docker-compose.yml', 'w') as f:
+    f.write(compose_content)
+
+print("[file-tag: docker-compose.yml]")
