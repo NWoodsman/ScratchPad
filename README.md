@@ -24,17 +24,48 @@ The repo is designed to run two servers:
 
 ## Installation
 
-### Prerequisites
+### General (Windows, Linux, MacOS)
+
+You will need to open ports 63000 and 63001. 
+
+Clone the project and `cd` into the root directory, then run:
+
+```
+python3 server.py &
+python3 -m http.server 63001 &
+trap "kill 0" EXIT
+```
+
+This spins-up both servers in a single terminal window and will run until the terminal is closed
+
+Now open a web browser and visit `localhost:63001` if you are connecting from the main PC. Or visit `ip_address:63001` if on another PC in your local network.
+
+Type some text and you will see it appear magically in any browser currently visiting the ip address.
+
+### Docker
+
+A container is published to `ghcr.io` and set to track `main`.
+
+In the following command, `sha-*` will change based on the current HEAD of main branch.
+
+Use the current main branch hash with this command to obtain the latest container.
+
+```
+docker pull ghcr.io/nwoodsman/scratchpad:sha-6676bae
+```
+
+### NixOS
+
 You will need to open ports 63000 and 63001.
 
-If using in NixOS, these commands should be run first will temporarily open the ports until the next boot.
+These commands will temporarily open the ports until the next boot.
 
     sudo nixos-firewall-tool open tcp 63000
     sudo nixos-firewall-tool open tcp 63001
 
 If you would like to make it permanent, edit your config.  
 
-### Installing
+#### Installing (in NixOS)
 
 The repo is designed for easy deployment in a nix dev shell. 
 
@@ -43,20 +74,6 @@ Clone the project and `cd` into the root directory, then run
     nix develop
 
 This should spin up both servers. 
-
-#### Other distros
-
-If you are not on NixOS, you will need to run the command in `flake.nix`, namely:
-
-    python3 server.py &
-    python3 -m http.server 63001 &
-    trap "kill 0" EXIT
-
-This spins-up both servers in a single terminal window and will run until the terminal is closed
-
-Now open a web browser and visit `localhost:63001` if you are connecting from the main PC. Or visit `ip_address:63001` if on another PC in your local network.
-
-Type some text and you will see it appear magically in any browser currently visiting the ip address.
 
 ## Architecture
 
