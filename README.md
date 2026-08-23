@@ -67,19 +67,25 @@ If you would like to make it permanent, edit your config.
 
 #### Installing (in NixOS)
 
-The repo is designed for easy deployment in a nix dev shell. 
-
 Clone the project and `cd` into the root directory, then run
 
-    nix develop
+```
+nix run .
+```
 
-This should spin up both servers. 
+This should spin up both servers. Exit with Ctrl+Z or Ctrl+C.
 
 ## Architecture
 
 The scratch pad functions by using the standardized web feature `designMode` available in all browsers which allows editing arbitrary html page content. So we make the entire page a single body `div` that we can edit and paste text into.
 
 The scratch pad content is stored in browser local storage. A timer updates a local `content.txt` backup file every 20 seconds.
+
+The backup file is located:
+
+On Windows: ` C:\Users\<User>\AppData\Local\ScratchPad`
+On MacOS: ` ~/Library/Application Support/ScratchPad`
+On Linux: `XDG_DATA_HOME` or `~/.local/share/ScratchPad`
 
 The local text is diffed using [https://github.com/jhchen/fast-diff](https://github.com/jhchen/fast-diff) and only diffs are sent through the socket.
 
