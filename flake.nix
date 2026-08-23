@@ -1,29 +1,23 @@
 {
-  description = "Real-time sync server and static file server dev environment";
+  description = "ScratchPad Flake";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
   };
 
   outputs = { self, nixpkgs }:
     let
-      system = "x86_64-linux"; # Adjust to aarch64-darwin if on Apple Silicon Mac
-      pkgs = nixpkgs.legacyPackages.${system};
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
-      devShells.${system}.default = pkgs.mkShell {
-        buildInputs = [
-          (pkgs.python3.withPackages (ps: [
-            ps.websockets
-          ]))
-        ];
-
-        shellHook = ''
-          echo "Starting Python WebSocket server and static file server..."
-          python3 server.py &
-          python3 -m http.server 63001 &
-          trap "kill 0" EXIT
-        '';
-      };
+      packages = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        {
+          # Call your local default.nix
+          default = pkgs.callPackage ./default.nix {};
+        });
     };
 }
