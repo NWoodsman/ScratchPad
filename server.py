@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import platform
 from websockets.asyncio.server import serve
+from platformdirs import user_data_dir
 
 connected_clients = set()
 shared_content = ""
@@ -11,32 +12,22 @@ is_dirty = False
 
 
 def get_data_file_path() -> Path:
-    system = platform.system()
-    
-    if system == "Windows":
-        # Windows standard: C:\Users\<User>\AppData\Local\ScratchPad
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            data_dir = Path(local_app_data) / "ScratchPad"
-        else:
-            data_dir = Path.home() / "AppData" / "Local" / "ScratchPad"
-            
-    elif system == "Darwin":
-        # macOS standard: ~/Library/Application Support/ScratchPad
-        data_dir = Path.home() / "Library" / "Application Support" / "ScratchPad"
-        
+    # 1. Systemd/NixOS override takes highest priority
+    systemd_data_dir = os.environ.get("DATA_DIR")
+    if systemd_data_dir:
+        data_dir = Path(systemd_data_dir)
     else:
-        # Linux / Unix standard (XDG)
-        xdg_data_home = os.environ.get("XDG_DATA_HOME")
-        if xdg_data_home:
-            data_dir = Path(xdg_data_home) / "ScratchPad"
-        else:
-            data_dir = Path.home() / ".local" / "share" / "ScratchPad"
-    
-    # Create the directory safely regardless of the OS
+        # 2. Cross-platform fallback using standard OS conventions:
+        # Windows: AppData\Local\ScratchPad
+        # macOS:   ~/Library/Application Support/ScratchPad
+        # Linux:   ~/.local/share/ScratchPad (respects XDG_DATA_HOME)
+        data_dir = Path(user_data_dir(appname="ScratchPad"))
+
+    # 3. Create the directory layout safely
     data_dir.mkdir(parents=True, exist_ok=True)
     
     return data_dir / "content.txt"
+
 
 
 DATA_FILE = get_data_file_path()

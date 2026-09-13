@@ -33,7 +33,7 @@ Clone the project and `cd` into the root directory, then run:
 ```
 python3 server.py &
 python3 -m http.server 63001 &
-trap "kill 0" EXIT
+trap "kill 0" EXIT INT TERM
 ```
 
 This spins-up both servers in a single terminal window and will run until the terminal is closed
@@ -56,24 +56,70 @@ docker pull ghcr.io/nwoodsman/scratchpad:sha-6676bae
 
 ### NixOS
 
-You will need to open ports 63000 and 63001.
+#### Try temporarily
+
+You can temporarily try out ScratchPad. It will be accessible from a browser window on the same PC. However, if you want to access the temporary ScratchPad from another PC on your local network,you will need to open ports 63000 and 63001.
 
 These commands will temporarily open the ports until the next boot.
 
     sudo nixos-firewall-tool open tcp 63000
     sudo nixos-firewall-tool open tcp 63001
 
-If you would like to make it permanent, edit your config.  
+Now you can temporarily run ScratchPad in a shell:
+
+    nix run github:NWoodsman/ScratchPad
+
 
 #### Installing (in NixOS)
 
-Clone the project and `cd` into the root directory, then run
+Add ScratchPad to your `flake.nix` and `configuration.nix`. Here is an example flake:
+
+
+#### `flake.nix`
+```nix
+
+{
+  description = "main flake example that pulls in ScratchPad";
+
+  inputs = {
+    # Keep using your pinned/locked unstable nixpkgs reference
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    
+    # Add your python server project repository as a flake input
+    ScratchPad.url = "github:NWoodsman/ScratchPad";
+  };
+
+  outputs = { self, nixpkgs, ScratchPad, ... }: {
+    nixosConfigurations.myhostname = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux"; # Adjust to your architecture if different
+      modules = [
+        # 1. Inject the module exposed by your app's flake
+        ScratchPad.nixosModules.default
+        
+        # 2. Pull in your standard system layout file
+        ./configuration.nix
+        ./hardware-configuration.nix
+      ];
+    };
+  };
+}
 
 ```
-nix run .
+#### `configuration.nix`
+
+```nix
+
+{ config, pkgs, ... }:
+
+{
+  # ... Your existing system configurations (timezone, users, bootloader, etc.) ...
+
+  # Enable ScratchPad
+  services.Scratchpad.enable = true;
+}
+
 ```
 
-This should spin up both servers. Exit with Ctrl+Z or Ctrl+C.
 
 ## Architecture
 
