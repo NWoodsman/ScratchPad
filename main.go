@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,7 +19,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/coder/websocket"
 )
@@ -127,7 +127,8 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.CloseNow()
 	if s.maxBytes > 0 {
-		conn.SetReadLimit(s.maxBytes)
+		// JSON escaping can inflate text up to 6x (\uXXXX), plus envelope.
+		conn.SetReadLimit(6*s.maxBytes + 1024)
 	} else {
 		conn.SetReadLimit(-1) // the library's own default is only 32 KiB
 	}
@@ -144,9 +145,13 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-ctx.Done():
 				return
-			case text := <-c.send:
+			case <-c.kick:
+				// Fell too far behind; the client reconnects and resyncs.
+				conn.Close(websocket.StatusTryAgainLater, "too far behind")
+				return
+			case msg := <-c.send:
 				wctx, wcancel := context.WithTimeout(ctx, writeTimeout)
-				err := conn.Write(wctx, websocket.MessageText, []byte(text))
+				err := conn.Write(wctx, websocket.MessageText, msg)
 				wcancel()
 				if err != nil {
 					return
@@ -158,15 +163,21 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
-			// Oversized messages are closed with 1009 by the library;
-			// the client shows that instead of silently losing the text.
 			return
 		}
-		if typ != websocket.MessageText || !utf8.Valid(data) {
-			conn.Close(websocket.StatusUnsupportedData, "expected UTF-8 text")
+		var p clientPatch
+		if typ != websocket.MessageText || json.Unmarshal(data, &p) != nil || p.T != "patch" || p.Base == nil {
+			conn.Close(websocket.StatusUnsupportedData, "expected a patch message")
 			return
 		}
-		s.hub.Update(c, string(data))
+		switch err := s.hub.Apply(c, *p.Base, p.At, p.Del, p.Ins); {
+		case errors.Is(err, errTooLarge):
+			conn.Close(websocket.StatusMessageTooBig, "document too large")
+			return
+		case err != nil:
+			conn.Close(websocket.StatusPolicyViolation, err.Error())
+			return
+		}
 	}
 }
 
@@ -183,7 +194,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", store.path, err)
 	}
-	hub := NewHub(initial)
+	hub := NewHub(initial, cfg.maxBytes)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -116,9 +116,17 @@ The server keeps the text in memory and writes it to `content.txt` within a few 
 
 ## How it works
 
-The page is a single full-screen `<textarea>` built into the binary. On every edit, the browser sends the whole text over the WebSocket, and the server forwards it to every other open browser. When text arrives from another browser, your cursor and scroll position stay where they were.
+The page is a single full-screen `<textarea>` built into the binary. When it connects, it gets the full text once. After that, only edits travel over the WebSocket, so typing in a large document stays cheap.
 
-If the connection drops, a "disconnected" badge appears and the page keeps reconnecting. Anything you type while offline is sent once the connection is back, replacing the server's copy.
+**Finding the edit.** Each edit is found by trimming the common start and end of the old and new text (the first step of [fast-diff](https://github.com/jhchen/fast-diff)). With one edit per keystroke or paste, the change is always a single region, so this is all the diffing needed. It never splits an emoji's surrogate pair.
+
+**Versions and retries.** Each edit is sent with the version of the text it was made against. The server applies it only if that's still the current version, then acks the sender and forwards the edit to every other browser. If another edit got in first, the server rejects it, and the browser merges in the newer edits and resends.
+
+**Simultaneous edits.** Edits to different parts of the text both survive. If two people change the same spot at the same moment, the later one wins for that spot.
+
+**Your cursor.** When edits arrive from another browser, your cursor and scroll position stay where they were.
+
+**Going offline.** If the connection drops, a "disconnected" badge appears and the page keeps reconnecting. When it reconnects, anything you typed while offline is merged the same way.
 
 The page uses JetBrains Mono if it's installed locally and otherwise falls back to your system's monospace font. It makes no external requests, so it works on networks without internet access.
 

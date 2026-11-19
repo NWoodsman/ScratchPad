@@ -66,10 +66,14 @@
         const maxBytes = Number(document.querySelector('meta[name="scratchpad-max-bytes"]').content) || Infinity;
         const encoder = new TextEncoder();
 
+        // Sync state. `shadow` is the server's text at version `ver`; the pad may
+        // be ahead of it with local edits. Only one patch is in flight at a time.
         let socket = null;
         let retries = 0;
-        let awaitingInitial = true; // first message after (re)connect is the server's state
-        let editedOffline = false;  // local edits that the server hasn't seen yet
+        let synced = false;     // received the full text on this connection
+        let shadow = "";
+        let ver = 0;
+        let inflight = null;    // pad text when the in-flight patch was sent
         let warning = "";
 
         function showStatus(text) {
@@ -77,52 +81,123 @@
             status.hidden = !text;
         }
 
+        const isHigh = (c) => c >= 0xd800 && c <= 0xdbff;
+        const isLow = (c) => c >= 0xdc00 && c <= 0xdfff;
+
+        // The single edit that turns a into b: trim the common prefix and
+        // suffix (fast-diff's first step; with one edit per input event the
+        // change is always one contiguous region). Never splits a surrogate
+        // pair. Returns null if a === b.
+        function diff(a, b) {
+            if (a === b) return null;
+            const min = Math.min(a.length, b.length);
+            let p = 0;
+            while (p < min && a.charCodeAt(p) === b.charCodeAt(p)) p++;
+            let s = 0;
+            while (s < min - p && a.charCodeAt(a.length - 1 - s) === b.charCodeAt(b.length - 1 - s)) s++;
+            if (p > 0 && isHigh(a.charCodeAt(p - 1))) p--;
+            if (s > 0 && isLow(a.charCodeAt(a.length - s))) s--;
+            return { at: p, del: a.length - p - s, ins: b.slice(p, b.length - s) };
+        }
+
+        const apply = (text, e) => text.slice(0, e.at) + e.ins + text.slice(e.at + e.del);
+
+        // Shift remote edit r (made against the shadow) past local edit l
+        // (also against the shadow). null if they touch the same region, in
+        // which case the local text is kept and overwrites that region.
+        function rebase(r, l) {
+            if (!l) return r;
+            if (r.at + r.del <= l.at) return r;
+            if (r.at >= l.at + l.del) return { at: r.at + l.ins.length - l.del, del: r.del, ins: r.ins };
+            return null;
+        }
+
+        // Move the shadow to newShadow (reached from the old shadow by edit r)
+        // and apply r to the pad on top of any unsent local edits.
+        function receive(newShadow, r) {
+            const local = diff(shadow, pad.value);
+            shadow = newShadow;
+            const e = r && rebase(r, local);
+            if (!e) return;
+            const top = pad.scrollTop;
+            // "preserve" keeps the caret and selection anchored to the text around them.
+            pad.setRangeText(e.ins, e.at, e.at + e.del, "preserve");
+            pad.scrollTop = top;
+        }
+
         function tooLarge(text) {
             // Cheap check first: UTF-8 is at most 3 bytes per UTF-16 code unit.
             return text.length * 3 > maxBytes && encoder.encode(text).length > maxBytes;
         }
 
-        function send() {
+        // Send whatever the pad has that the server doesn't.
+        function flush() {
+            if (!synced || inflight !== null) return;
             const text = pad.value;
+            const e = diff(shadow, text);
+            if (!e) return;
             if (tooLarge(text)) {
                 warning = `too large to sync (limit ${(maxBytes / 1048576).toFixed(0)} MiB)`;
                 showStatus(warning);
-                editedOffline = true;
                 return;
             }
             if (warning) { warning = ""; showStatus(""); }
-            socket.send(text);
+            inflight = text;
+            socket.send(JSON.stringify({ t: "patch", base: ver, at: e.at, del: e.del, ins: e.ins }));
         }
 
-        // Replace the text but keep the caret and scroll position where they
-        // were, by mapping them through the region that actually changed.
-        function applyRemote(text) {
-            const old = pad.value;
-            if (text === old) return;
-            const { selectionStart, selectionEnd, selectionDirection, scrollTop } = pad;
+        // Our copy no longer matches the server's: reconnect for a fresh full copy.
+        function resync() {
+            if (socket) socket.close(4000, "resync");
+        }
 
-            const min = Math.min(old.length, text.length);
-            let prefix = 0;
-            while (prefix < min && old.charCodeAt(prefix) === text.charCodeAt(prefix)) prefix++;
-            let suffix = 0;
-            while (suffix < min - prefix &&
-                   old.charCodeAt(old.length - 1 - suffix) === text.charCodeAt(text.length - 1 - suffix)) suffix++;
+        function onFull(m) {
+            // If a patch was in flight when the connection dropped, it may or
+            // may not have been applied. Use whichever base is closer to the
+            // server's text, so our own edit isn't applied twice.
+            let base = shadow;
+            if (inflight !== null) {
+                const size = (e) => (e ? e.del + e.ins.length : 0);
+                if (size(diff(inflight, m.text)) <= size(diff(shadow, m.text))) base = inflight;
+                inflight = null;
+            }
+            shadow = base;
+            receive(m.text, diff(base, m.text));
+            ver = m.v;
+            synced = true;
+            pad.readOnly = false;
+            pad.placeholder = "";
+            flush(); // edits made while offline
+        }
 
-            const map = (i) => {
-                if (i <= prefix) return i;
-                if (i >= old.length - suffix) return i + text.length - old.length;
-                return text.length - suffix; // inside the replaced region: go to its end
-            };
+        function onPatch(m) {
+            if (m.v !== ver + 1) return resync();
+            const e = { at: m.at, del: m.del, ins: m.ins };
+            const next = apply(shadow, e);
+            if (next.length !== m.len) return resync();
+            receive(next, e);
+            ver = m.v;
+        }
 
-            pad.value = text;
-            pad.setSelectionRange(map(selectionStart), map(selectionEnd), selectionDirection);
-            pad.scrollTop = scrollTop;
+        function onAck(m) {
+            if (inflight === null || inflight.length !== m.len) return resync();
+            shadow = inflight;
+            ver = m.v;
+            inflight = null;
+            flush();
+        }
+
+        function onNack() {
+            // Someone else's edit got in first; those patches already arrived
+            // and were merged, so just send our rebased edit again.
+            inflight = null;
+            flush();
         }
 
         function connect() {
             const proto = location.protocol === "https:" ? "wss:" : "ws:";
             socket = new WebSocket(`${proto}//${location.host}/ws`);
-            awaitingInitial = true;
+            synced = false;
 
             socket.onopen = () => {
                 retries = 0;
@@ -130,23 +205,22 @@
             };
 
             socket.onmessage = (event) => {
-                if (typeof event.data !== "string") return;
-                if (awaitingInitial) {
-                    awaitingInitial = false;
-                    pad.readOnly = false;
-                    pad.placeholder = "";
-                    if (editedOffline) {
-                        // Our offline edits win over the server's copy.
-                        editedOffline = false;
-                        send();
-                        return;
-                    }
-                }
-                applyRemote(event.data);
+                let m;
+                try { m = JSON.parse(event.data); } catch { return resync(); }
+                if (m.t === "full") onFull(m);
+                else if (!synced) resync();
+                else if (m.t === "patch") onPatch(m);
+                else if (m.t === "ack") onAck(m);
+                else if (m.t === "nack") onNack();
             };
 
             socket.onclose = (event) => {
                 socket = null;
+                synced = false;
+                if (event.code === 4000) { // our own resync: reconnect straight away
+                    setTimeout(connect, 0);
+                    return;
+                }
                 const why = event.code === 1009 ? "too large to sync" : "disconnected";
                 showStatus(`${why} — reconnecting…`);
                 const delay = Math.min(30000, 500 * 2 ** retries++);
@@ -154,13 +228,7 @@
             };
         }
 
-        pad.addEventListener("input", () => {
-            if (socket && socket.readyState === WebSocket.OPEN && !awaitingInitial) {
-                send();
-            } else {
-                editedOffline = true;
-            }
-        });
+        pad.addEventListener("input", flush);
 
         // Tab inserts a tab character instead of moving focus.
         pad.addEventListener("keydown", (event) => {
