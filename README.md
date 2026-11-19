@@ -1,5 +1,5 @@
 # ScratchPad
-A simple self-hosted scratch pad using WebSockets. Allows you to move text between multiple PCs on a local network and syncs edits in real time across the network. Designed to be as lightweight as possible.
+A simple self-hosted scratch pad. Move text between PCs on your local network, with edits synced in real time to every open browser. It's a single small binary with no runtime dependencies.
 
 
 
@@ -9,143 +9,128 @@ https://github.com/user-attachments/assets/f2c80fc5-60e5-416a-940d-48f7640ddd6b
 
 
 
-Live edits are propagated using web sockets. (Caution: there is no dispute resolution if multiple users are editing at once. This is intended for you to use as a scratch pad as a single user, synchronously.)
+(Caution: there's no merging if several people edit at once. The last edit wins. It's meant as a scratch pad for one person at a time.)
 
-The repo is designed to run two servers: 
+One process on **port 63001** serves the page and the WebSocket that keeps browsers in sync.
 
-- An http server runs on port 63001 and serves a single http file.
-- A WebSocket server runs on port 63000 and synchronizes all the client updates.
+__Caution! There is no encryption or login. Anything pasted in the scratchpad is sent in the clear to anyone who can reach the port. Don't use it for sensitive information!__ (Other *websites* can't reach it: the server rejects WebSocket connections from other origins.)
 
-  __Caution! This repo is not security hardened and uses no encryption. Anything pasted in the scratchpad is transmitted in the clear! Do not use for sensitive information!__
+## Running
 
-## Dependencies
-- Python3
-- websockets
+Open port 63001 in your firewall, start ScratchPad, then visit `localhost:63001` on the same PC or `<ip-address>:63001` from another PC on your network.
 
-## Installation
+### From source (Windows, Linux, macOS)
 
-### General (Windows, Linux, MacOS)
-
-You will need to open ports 63000 and 63001. 
-
-Clone the project and `cd` into the root directory, then run:
+Requires [Go](https://go.dev/dl/) 1.24 or newer.
 
 ```
-python3 server.py &
-python3 -m http.server 63001 &
-trap "kill 0" EXIT INT TERM
+go build
+./ScratchPad
 ```
 
-This spins-up both servers in a single terminal window and will run until the terminal is closed
+To cross-compile, e.g. for Windows: `GOOS=windows GOARCH=amd64 go build`.
 
-Now open a web browser and visit `localhost:63001` if you are connecting from the main PC. Or visit `ip_address:63001` if on another PC in your local network.
+### Options
 
-Type some text and you will see it appear magically in any browser currently visiting the ip address.
+| Flag | Environment variable | Default |
+|---|---|---|
+| `-listen` | `SCRATCHPAD_LISTEN` | `:63001` (all interfaces) |
+| `-data-dir` | `SCRATCHPAD_DATA_DIR` | OS user data dir (see below) |
+| `-allowed-origins` | `SCRATCHPAD_ALLOWED_ORIGINS` | none (same-origin only) |
+| `-max-mib` | `SCRATCHPAD_MAX_MIB` | `16` |
+| `-save-interval` | | `5s` |
+
+`-allowed-origins` is only needed behind a reverse proxy that serves the page under a different hostname than the one ScratchPad sees, e.g. `-allowed-origins pad.example.com`. HTTPS reverse proxies work: the page uses `wss://` automatically.
 
 ### Docker
 
-A container is published to `ghcr.io` and set to track `main`.
-
-In the following command, `sha-*` will change based on the current HEAD of main branch.
-
-Use the current main branch hash with this command to obtain the latest container.
+An image for `linux/amd64` and `linux/arm64` is published to `ghcr.io` from `main`:
 
 ```
-docker pull ghcr.io/nwoodsman/scratchpad:sha-6676bae
+docker run -d -p 63001:63001 -v scratchpad-data:/data ghcr.io/nwoodsman/scratchpad:latest
 ```
+
+Or use the included [`docker-compose.yml`](docker-compose.yml): `docker compose up -d`.
 
 ### NixOS
 
 #### Try temporarily
 
-You can temporarily try out ScratchPad. It will be accessible from a browser window on the same PC. However, if you want to access the temporary ScratchPad from another PC on your local network,you will need to open ports 63000 and 63001.
-
-These commands will temporarily open the ports until the next boot.
-
-    sudo nixos-firewall-tool open tcp 63000
-    sudo nixos-firewall-tool open tcp 63001
-
-Now you can temporarily run ScratchPad in a shell:
-
     nix run github:NWoodsman/ScratchPad
 
+To reach it from another PC, open the port until the next boot:
 
-#### Installing (in NixOS)
+    sudo nixos-firewall-tool open tcp 63001
 
-Add ScratchPad to your `flake.nix` and `configuration.nix`. Here is an example flake:
+#### Installing
 
+Add ScratchPad to your `flake.nix`:
 
-#### `flake.nix`
 ```nix
-
 {
-  description = "main flake example that pulls in ScratchPad";
-
   inputs = {
-    # Keep using your pinned/locked unstable nixpkgs reference
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
-    
-    # Add your python server project repository as a flake input
     ScratchPad.url = "github:NWoodsman/ScratchPad";
   };
 
   outputs = { self, nixpkgs, ScratchPad, ... }: {
     nixosConfigurations.myhostname = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux"; # Adjust to your architecture if different
+      system = "x86_64-linux";
       modules = [
-        # 1. Inject the module exposed by your app's flake
         ScratchPad.nixosModules.default
-        
-        # 2. Pull in your standard system layout file
         ./configuration.nix
         ./hardware-configuration.nix
       ];
     };
   };
 }
-
 ```
-#### `configuration.nix`
+
+and enable it in `configuration.nix`:
 
 ```nix
-
-{ config, pkgs, ... }:
-
 {
-  # ... Your existing system configurations (timezone, users, bootloader, etc.) ...
-
-  # Enable ScratchPad
-  services.Scratchpad.enable = true;
+  services.ScratchPad = {
+    enable = true;
+    openFirewall = true;      # default: false
+    # port = 63001;
+    # listenAddress = "";     # empty = all interfaces
+    # allowedOrigins = [ ];   # extra hostnames, for reverse proxies
+  };
 }
-
 ```
 
+Content is stored in `/var/lib/ScratchPad`.
 
-## Architecture
+## Storage
 
-The scratch pad functions by using the standardized web feature `designMode` available in all browsers which allows editing arbitrary html page content. So we make the entire page a single body `div` that we can edit and paste text into.
+The server keeps the text in memory and writes it to `content.txt` within a few seconds of a change, and again on shutdown. Writes are atomic, so a crash can't leave a half-written file.
 
-The scratch pad content is stored in browser local storage. A timer updates a local `content.txt` backup file every 20 seconds.
+`content.txt` is stored in:
 
-The backup file is located:
+- Windows: `%LOCALAPPDATA%\ScratchPad`
+- macOS: `~/Library/Application Support/ScratchPad`
+- Linux: `$XDG_DATA_HOME/ScratchPad`, or `~/.local/share/ScratchPad`
+- Docker: the `/data` volume
+- NixOS module: `/var/lib/ScratchPad`
 
-On Windows: ` C:\Users\<User>\AppData\Local\ScratchPad`
-On MacOS: ` ~/Library/Application Support/ScratchPad`
-On Linux: `XDG_DATA_HOME` or `~/.local/share/ScratchPad`
+## How it works
 
-The local text is diffed using [https://github.com/jhchen/fast-diff](https://github.com/jhchen/fast-diff) and only diffs are sent through the socket.
+The page is a single full-screen `<textarea>` built into the binary. On every edit, the browser sends the whole text over the WebSocket, and the server forwards it to every other open browser. When text arrives from another browser, your cursor and scroll position stay where they were.
 
-The html file uses JetBrains Mono from Google Fonts but will fallback to monospace. 
+If the connection drops, a "disconnected" badge appears and the page keeps reconnecting. Anything you type while offline is sent once the connection is back, replacing the server's copy.
+
+The page uses JetBrains Mono if it's installed locally and otherwise falls back to your system's monospace font. It makes no external requests, so it works on networks without internet access.
+
+## Development
+
+```
+nix develop        # or install Go yourself
+go test -race ./...
+```
+
+If you change Go dependencies, update `vendorHash` in `package.nix`. To get the new hash, set it to `lib.fakeHash`, run `nix build`, and copy the hash it reports.
 
 ## License
 
-Apache 2 license to stay in-sync with `fast-diff`.
-
-`fast-diff` Copyright 2014-2023 Jason Chen 
-
-See LICENSE for attribution.
-
-
-
-
-
+Apache 2.0.

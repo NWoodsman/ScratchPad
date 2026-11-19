@@ -1,61 +1,90 @@
 { config, lib, pkgs, ... }:
 
-with lib;
-
 let
   cfg = config.services.ScratchPad;
-  scratchPadPkg = pkgs.callPackage ./package.nix {};
-in {
+in
+{
   options.services.ScratchPad = {
-    enable = mkEnableOption "Enable ScratchPad";
+    enable = lib.mkEnableOption "ScratchPad";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.callPackage ./package.nix { };
+      defaultText = lib.literalMD "the ScratchPad package from this flake";
+      description = "The ScratchPad package to run.";
+    };
+
+    listenAddress = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "127.0.0.1";
+      description = ''
+        Address to bind. Empty listens on all interfaces.
+        Wrap IPv6 addresses in brackets, e.g. `[::1]`.
+      '';
+    };
+
+    port = lib.mkOption {
+      type = lib.types.port;
+      default = 63001;
+      description = "Port serving both the page and the WebSocket.";
+    };
+
+    openFirewall = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Open {option}`services.ScratchPad.port` in the firewall.";
+    };
+
+    allowedOrigins = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "pad.example.com" ];
+      description = ''
+        Extra origin hosts allowed to open the WebSocket, e.g. when served
+        behind a reverse proxy under a different hostname. Same-origin
+        requests are always allowed.
+      '';
+    };
   };
 
-  config = mkIf cfg.enable {
-    # Automatically open the configured port in the firewall
-    networking.firewall.allowedTCPPorts = [63000 63001 ];
-    
-    
-    # Service 1: The WebSocket Backend (server.py)
-    systemd.services.ScratchPad-WebSockets = {
-      description = "Scratchpad WebSockets Backend Server";
+  config = lib.mkIf cfg.enable {
+    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
+
+    systemd.services.scratchpad = {
+      description = "ScratchPad";
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
-      
+
       environment = {
-        DATA_DIR = "/var/lib/ScratchPad";  
+        SCRATCHPAD_LISTEN = "${cfg.listenAddress}:${toString cfg.port}";
+        SCRATCHPAD_DATA_DIR = "/var/lib/ScratchPad";
+        SCRATCHPAD_ALLOWED_ORIGINS = lib.concatStringsSep "," cfg.allowedOrigins;
       };
 
       serviceConfig = {
-        # Directly execute server.py using the bundled python symlink
-        ExecStart = "${scratchPadPkg}/bin/python3 ${scratchPadPkg}/share/ScratchPad/server.py";
-        WorkingDirectory = "${scratchPadPkg}/share/ScratchPad";
-        Restart = "always";
-        
+        ExecStart = lib.getExe cfg.package;
+        Restart = "on-failure";
         StateDirectory = "ScratchPad";
-        
-        # Security hardening
+        StateDirectoryMode = "0700";
+
+        # Hardening
         DynamicUser = true;
-        ProtectSystem = "full";
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        NoNewPrivileges = true;
+        ProtectKernelTunables = true;
+        ProtectKernelModules = true;
+        ProtectControlGroups = true;
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+        RestrictNamespaces = true;
+        LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        SystemCallArchitectures = "native";
+        CapabilityBoundingSet = "";
       };
     };
-
-    # Service 2: The HTTP Frontend (http.server)
-    systemd.services.ScratchPad-HTTP = {
-      description = "ScratchPad HTTP Frontend Server";
-      after = [ "network.target" ];
-      wantedBy = [ "multi-user.target" ];
-
-      serviceConfig = {
-        # Directly execute the HTTP module
-        ExecStart = "${scratchPadPkg}/bin/python3 -m http.server 63001";
-        WorkingDirectory = "${scratchPadPkg}/share/ScratchPad";
-        Restart = "always";
-        
-        # Security hardening
-        DynamicUser = true;
-        ProtectSystem = "full";
-      };
-    };
-    
   };
 }

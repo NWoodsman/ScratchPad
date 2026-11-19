@@ -1,0 +1,6 @@
+# Only send what the build needs.
+*
+!go.mod
+!go.sum
+!*.go
+!web/

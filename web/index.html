@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="scratchpad-max-bytes" content="{{MAX_BYTES}}">
+    <title>ScratchPad</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #181a1b;
+            --fg: #b2aba1;
+            --warn-bg: #3a1d1d;
+            --warn-fg: #e8a0a0;
+        }
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: var(--bg);
+        }
+        #pad {
+            box-sizing: border-box;
+            display: block;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 20px;
+            border: 0;
+            outline: none;
+            resize: none;
+            background: transparent;
+            color: var(--fg);
+            /* Uses JetBrains Mono if installed locally; no external font fetch. */
+            font-family: 'JetBrains Mono', Consolas, 'Fira Code', 'SF Mono', Monaco, monospace;
+            font-size: 15px;
+            line-height: 1.6;
+            tab-size: 4;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+        #status {
+            position: fixed;
+            top: 8px;
+            right: 12px;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font: 12px system-ui, sans-serif;
+            background: var(--warn-bg);
+            color: var(--warn-fg);
+            pointer-events: none;
+        }
+        #status[hidden] { display: none; }
+    </style>
+</head>
+<body>
+    <textarea id="pad" spellcheck="false" autocomplete="off" autofocus readonly
+              aria-label="Scratch pad" placeholder="connecting…"></textarea>
+    <div id="status" role="status" hidden></div>
+
+    <script>
+    (() => {
+        "use strict";
+        const pad = document.getElementById("pad");
+        const status = document.getElementById("status");
+        const maxBytes = Number(document.querySelector('meta[name="scratchpad-max-bytes"]').content) || Infinity;
+        const encoder = new TextEncoder();
+
+        let socket = null;
+        let retries = 0;
+        let awaitingInitial = true; // first message after (re)connect is the server's state
+        let editedOffline = false;  // local edits that the server hasn't seen yet
+        let warning = "";
+
+        function showStatus(text) {
+            status.textContent = text;
+            status.hidden = !text;
+        }
+
+        function tooLarge(text) {
+            // Cheap check first: UTF-8 is at most 3 bytes per UTF-16 code unit.
+            return text.length * 3 > maxBytes && encoder.encode(text).length > maxBytes;
+        }
+
+        function send() {
+            const text = pad.value;
+            if (tooLarge(text)) {
+                warning = `too large to sync (limit ${(maxBytes / 1048576).toFixed(0)} MiB)`;
+                showStatus(warning);
+                editedOffline = true;
+                return;
+            }
+            if (warning) { warning = ""; showStatus(""); }
+            socket.send(text);
+        }
+
+        // Replace the text but keep the caret and scroll position where they
+        // were, by mapping them through the region that actually changed.
+        function applyRemote(text) {
+            const old = pad.value;
+            if (text === old) return;
+            const { selectionStart, selectionEnd, selectionDirection, scrollTop } = pad;
+
+            const min = Math.min(old.length, text.length);
+            let prefix = 0;
+            while (prefix < min && old.charCodeAt(prefix) === text.charCodeAt(prefix)) prefix++;
+            let suffix = 0;
+            while (suffix < min - prefix &&
+                   old.charCodeAt(old.length - 1 - suffix) === text.charCodeAt(text.length - 1 - suffix)) suffix++;
+
+            const map = (i) => {
+                if (i <= prefix) return i;
+                if (i >= old.length - suffix) return i + text.length - old.length;
+                return text.length - suffix; // inside the replaced region: go to its end
+            };
+
+            pad.value = text;
+            pad.setSelectionRange(map(selectionStart), map(selectionEnd), selectionDirection);
+            pad.scrollTop = scrollTop;
+        }
+
+        function connect() {
+            const proto = location.protocol === "https:" ? "wss:" : "ws:";
+            socket = new WebSocket(`${proto}//${location.host}/ws`);
+            awaitingInitial = true;
+
+            socket.onopen = () => {
+                retries = 0;
+                showStatus(warning);
+            };
+
+            socket.onmessage = (event) => {
+                if (typeof event.data !== "string") return;
+                if (awaitingInitial) {
+                    awaitingInitial = false;
+                    pad.readOnly = false;
+                    pad.placeholder = "";
+                    if (editedOffline) {
+                        // Our offline edits win over the server's copy.
+                        editedOffline = false;
+                        send();
+                        return;
+                    }
+                }
+                applyRemote(event.data);
+            };
+
+            socket.onclose = (event) => {
+                socket = null;
+                const why = event.code === 1009 ? "too large to sync" : "disconnected";
+                showStatus(`${why} — reconnecting…`);
+                const delay = Math.min(30000, 500 * 2 ** retries++);
+                setTimeout(connect, delay);
+            };
+        }
+
+        pad.addEventListener("input", () => {
+            if (socket && socket.readyState === WebSocket.OPEN && !awaitingInitial) {
+                send();
+            } else {
+                editedOffline = true;
+            }
+        });
+
+        // Tab inserts a tab character instead of moving focus.
+        pad.addEventListener("keydown", (event) => {
+            if (event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+            event.preventDefault();
+            // execCommand keeps native undo; fall back where it's unsupported.
+            if (!document.execCommand("insertText", false, "\t")) {
+                pad.setRangeText("\t", pad.selectionStart, pad.selectionEnd, "end");
+                pad.dispatchEvent(new Event("input"));
+            }
+        });
+
+        connect();
+    })();
+    </script>
+</body>
+</html>
