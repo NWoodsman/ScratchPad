@@ -62,6 +62,7 @@
         "use strict";
         const pad = document.getElementById("pad");
         const status = document.getElementById("status");
+        // 0 (the default) means the server accepts any size.
         const maxBytes = Number(document.querySelector('meta[name="scratchpad-max-bytes"]').content) || Infinity;
         const encoder = new TextEncoder();
 

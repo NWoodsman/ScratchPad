@@ -37,7 +37,7 @@ To cross-compile, e.g. for Windows: `GOOS=windows GOARCH=amd64 go build`.
 | `-listen` | `SCRATCHPAD_LISTEN` | `:63001` (all interfaces) |
 | `-data-dir` | `SCRATCHPAD_DATA_DIR` | OS user data dir (see below) |
 | `-allowed-origins` | `SCRATCHPAD_ALLOWED_ORIGINS` | none (same-origin only) |
-| `-max-mib` | `SCRATCHPAD_MAX_MIB` | `16` |
+| `-max-mib` | `SCRATCHPAD_MAX_MIB` | `0` (no limit) |
 | `-save-interval` | | `5s` |
 
 `-allowed-origins` is only needed behind a reverse proxy that serves the page under a different hostname than the one ScratchPad sees, e.g. `-allowed-origins pad.example.com`. HTTPS reverse proxies work: the page uses `wss://` automatically.

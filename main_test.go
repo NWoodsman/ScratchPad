@@ -106,6 +106,27 @@ func TestTooLargeClosesWith1009(t *testing.T) {
 	}
 }
 
+func TestUnlimitedByDefault(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ts := httptest.NewServer(newServer(NewHub(""), 0, nil).routes())
+	defer ts.Close()
+
+	a := dial(t, ctx, ts.URL, "")
+	b := dial(t, ctx, ts.URL, "")
+	read(t, ctx, a)
+	read(t, ctx, b)
+	b.SetReadLimit(-1)
+
+	big := strings.Repeat("large paste ", 2<<20/12) // ~2 MiB, far past the library's 32 KiB default
+	if err := a.Write(ctx, websocket.MessageText, []byte(big)); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, ctx, b); got != big {
+		t.Fatalf("b got %d bytes, want %d", len(got), len(big))
+	}
+}
+
 func TestIndexHasLimit(t *testing.T) {
 	ts := httptest.NewServer(newServer(NewHub(""), 1234, nil).routes())
 	defer ts.Close()

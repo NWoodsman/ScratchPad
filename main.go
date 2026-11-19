@@ -32,7 +32,7 @@ type config struct {
 	listen       string
 	dataDir      string
 	saveInterval time.Duration
-	maxBytes     int64
+	maxBytes     int64 // <= 0 means unlimited
 	origins      []string
 }
 
@@ -49,7 +49,7 @@ func envOr(def string, keys ...string) string {
 func parseConfig() (config, error) {
 	var c config
 	var origins string
-	maxMiB, err := strconv.ParseInt(envOr("16", "SCRATCHPAD_MAX_MIB"), 10, 64)
+	maxMiB, err := strconv.ParseInt(envOr("0", "SCRATCHPAD_MAX_MIB"), 10, 64)
 	if err != nil {
 		return c, fmt.Errorf("SCRATCHPAD_MAX_MIB: %w", err)
 	}
@@ -60,7 +60,7 @@ func parseConfig() (config, error) {
 	flag.DurationVar(&c.saveInterval, "save-interval", 5*time.Second,
 		"how often unsaved changes are written to disk")
 	flag.Int64Var(&maxMiB, "max-mib", maxMiB,
-		"largest document accepted, in MiB (env SCRATCHPAD_MAX_MIB)")
+		"largest document accepted, in MiB; 0 means no limit (env SCRATCHPAD_MAX_MIB)")
 	flag.StringVar(&origins, "allowed-origins", envOr("", "SCRATCHPAD_ALLOWED_ORIGINS"),
 		"comma-separated extra origin hosts allowed to connect, e.g. pad.example.com "+
 			"(same-origin is always allowed; env SCRATCHPAD_ALLOWED_ORIGINS)")
@@ -71,8 +71,8 @@ func parseConfig() (config, error) {
 			return c, fmt.Errorf("finding data dir: %w", err)
 		}
 	}
-	if maxMiB <= 0 || c.saveInterval <= 0 {
-		return c, errors.New("-max-mib and -save-interval must be positive")
+	if maxMiB < 0 || c.saveInterval <= 0 {
+		return c, errors.New("-max-mib must be >= 0 and -save-interval positive")
 	}
 	c.maxBytes = maxMiB << 20
 	for _, o := range strings.Split(origins, ",") {
@@ -85,12 +85,15 @@ func parseConfig() (config, error) {
 
 type server struct {
 	hub      *Hub
-	maxBytes int64
+	maxBytes int64 // <= 0 means unlimited
 	origins  []string
 	index    []byte
 }
 
 func newServer(hub *Hub, maxBytes int64, origins []string) *server {
+	if maxBytes <= 0 {
+		maxBytes = 0 // the page treats 0 as "no limit"
+	}
 	page := strings.ReplaceAll(indexTemplate, "{{MAX_BYTES}}", strconv.FormatInt(maxBytes, 10))
 	return &server{hub: hub, maxBytes: maxBytes, origins: origins, index: []byte(page)}
 }
@@ -123,7 +126,11 @@ func (s *server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.CloseNow()
-	conn.SetReadLimit(s.maxBytes)
+	if s.maxBytes > 0 {
+		conn.SetReadLimit(s.maxBytes)
+	} else {
+		conn.SetReadLimit(-1) // the library's own default is only 32 KiB
+	}
 
 	c := s.hub.Join()
 	defer s.hub.Leave(c)
